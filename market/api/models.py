@@ -30,7 +30,7 @@ class Offer(models.Model):
 class Category(models.Model):
     # obj_id = models.UUIDField()
     obj_id = models.CharField(max_length=36)
-    imp = models.ForeignKey('Import', on_delete=models.DO_NOTHING)
+    imp = models.ForeignKey('Import', on_delete=models.CASCADE)
     name = models.TextField()
     offers_price = models.IntegerField(default=0)
     all_offers = models.IntegerField(default=0)

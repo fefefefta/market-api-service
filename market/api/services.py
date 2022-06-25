@@ -1,4 +1,5 @@
 import copy
+from math import floor
 
 from django.db import IntegrityError
 
@@ -313,3 +314,50 @@ def _create_offer(
         return None
 
     return offer
+
+#####################SHOW_NODE########################
+
+def make_representation(unit):
+    try:
+        parent_id = unit.parent.obj_id
+    except AttributeError:
+        parent_id = None
+    if isinstance(unit, Offer):
+        return {
+                "id": unit.obj_id,
+                "name": unit.name,
+                "date": _to_ISO8601(unit.imp.date),
+                "parentId": parent_id,
+                "type": "OFFER",
+                "price": unit.price,
+                "children": None
+            }
+    elif isinstance(unit, Category):
+        children_offers = unit.children_offers.filter(is_actual=True)
+        children_categories = unit.children_categories.filter(is_actual=True)
+
+        children = (list(map(make_representation, children_offers))
+                    + list(map(make_representation, children_categories)))
+        return {
+                "id": unit.obj_id,
+                "name": unit.name,
+                "date": _to_ISO8601(unit.imp.date),
+                "parentId": parent_id,
+                "type": "CATEGORY",
+                "price": _count_category_price(unit.offers_price,
+                                               unit.all_offers),
+                "children": children
+            }
+    else:
+        raise Exception("БУ!!! Я злющая ошибка, не дам вам никакую ноду!"
+                        " Вы где-то оплошали, простофили!")
+
+
+
+def _to_ISO8601(date):
+    return date
+
+
+def _count_category_price(offers_price, all_offers):
+    return floor(offers_price / all_offers) if all_offers > 0 else None
+
