@@ -1,3 +1,4 @@
+import copy
 from math import floor
 
 from django.core.validators import MinValueValidator
@@ -7,8 +8,20 @@ from django.db import models
 class Import(models.Model):
     date = models.DateTimeField()
 
+    @classmethod
+    def create_new_import(cls, update_date):
+        return cls.objects.create(date=update_date)
 
-class Offer(models.Model):
+
+class ShopUnit:
+    def create_history_version(self):
+        history_version = copy.copy(self)
+        history_version.pk = None
+        history_version.is_actual = False
+        return history_version
+
+
+class Offer(models.Model, ShopUnit):
     # obj_id = models.UUIDField()
     obj_id = models.CharField(max_length=36)
     imp = models.ForeignKey('Import', on_delete=models.DO_NOTHING)
@@ -29,7 +42,7 @@ class Offer(models.Model):
         return f"Offer \"{self.name}\", {'actual' if self.is_actual else 'archived'}"
 
 
-class Category(models.Model):
+class Category(models.Model, ShopUnit):
     # obj_id = models.UUIDField()
     obj_id = models.CharField(max_length=36)
     imp = models.ForeignKey('Import', on_delete=models.DO_NOTHING)
