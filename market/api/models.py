@@ -15,7 +15,7 @@ class Offer(models.Model):
     is_actual = models.BooleanField(default=True)
     parent = models.ForeignKey(
             'Category', 
-            on_delete=models.SET_NULL, 
+            on_delete=models.CASCADE, 
             related_name='children_offers', 
             null=True
         )
@@ -30,14 +30,14 @@ class Offer(models.Model):
 class Category(models.Model):
     # obj_id = models.UUIDField()
     obj_id = models.CharField(max_length=36)
-    imp = models.ForeignKey('Import', on_delete=models.CASCADE)
+    imp = models.ForeignKey('Import', on_delete=models.DO_NOTHING)
     name = models.TextField()
     offers_price = models.IntegerField(default=0)
     all_offers = models.IntegerField(default=0)
     is_actual = models.BooleanField(default=True)
     parent = models.ForeignKey(
             'self', 
-            on_delete=models.SET_NULL, 
+            on_delete=models.CASCADE, 
             related_name='children_categories', 
             null=True
         )

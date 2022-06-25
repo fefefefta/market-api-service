@@ -1,11 +1,9 @@
-from collections import deque
-
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from .serializers import OfferSerializer, CategorySerializer
-from .services import process_category, process_offer, make_representation
+from .services import (process_category, process_offer, make_representation,
+                       get_updated_offers)
 from .models import Offer, Category, Import
 
 
@@ -51,3 +49,14 @@ def delete_unit(request, obj_id):
 
     message = {"message": "Удаление прошло успешно."}
     return Response(message, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+def sales(request):
+    date = request.GET.get("date")
+    if True:
+        pass
+
+    response = get_updated_offers(date)
+    return Response(response, status=status.HTTP_200_OK)
+

@@ -1,6 +1,8 @@
 import copy
+import datetime
 from math import floor
 
+from dateutil import parser
 from django.db import IntegrityError
 
 from .models import Offer, Category
@@ -360,4 +362,28 @@ def _to_ISO8601(date):
 
 def _count_category_price(offers_price, all_offers):
     return floor(offers_price / all_offers) if all_offers > 0 else None
+
+
+################SALES##################
+
+def get_updated_offers(date):
+    finish_date = parser.isoparse(date)
+    start_date = finish_date - datetime.timedelta(days=1)
+
+    updated_offers = Offer.objects.filter(
+            imp__date__gte=start_date,
+            imp__date__lte=finish_date
+        ).select_related('imp')
+
+    response = []
+    for offer in updated_offers:
+        offer_dict = {
+            "id": offer.obj_id,
+            "name": offer.name,
+            "type": "OFFER",
+            "date": _to_ISO8601(offer.imp.date)
+        }
+        response.append(offer_dict)
+
+    return response
 
