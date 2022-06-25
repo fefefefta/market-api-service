@@ -1,3 +1,5 @@
+from math import floor
+
 from django.core.validators import MinValueValidator
 from django.db import models
 
@@ -47,3 +49,7 @@ class Category(models.Model):
 
     def __repr__(self):
         return f"Category \"{self.name}\", {'actual' if self.is_actual else 'archived'}"
+
+    @property
+    def price(self):
+        return floor(self.offers_price / self.all_offers) if self.all_offers > 0 else None

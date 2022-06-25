@@ -278,15 +278,18 @@ def _process_old_offer(offer_json, import_):
         history_version = _create_history_version(offer)
         offer.price = offer_json["price"]
         offer.name = offer_json["name"]
-        offer.parent = Category.objects.filter(
-                obj_id=offer_json["parentId"], 
-                is_actual=True
-            )[0]
+        try:
+            offer.parent = Category.objects.filter(
+                    obj_id=offer_json["parentId"], 
+                    is_actual=True
+                )[0]
+        except IndexError:
+            offer.parent = None
         offer.imp = import_
         offer.save()
         history_version.save()
 
-        new_ancestors = _get_ancestors(offer.parent.obj_id)
+        new_ancestors = _get_ancestors(offer.parent.obj_id if offer.parent else None)
         _update_ancestors(
                 new_ancestors, 
                 offers_diff=1,
@@ -346,8 +349,7 @@ def make_representation(unit):
                 "date": _to_ISO8601(unit.imp.date),
                 "parentId": parent_id,
                 "type": "CATEGORY",
-                "price": _count_category_price(unit.offers_price,
-                                               unit.all_offers),
+                "price": unit.price,
                 "children": children
             }
     else:
@@ -359,11 +361,6 @@ def make_representation(unit):
 def _to_ISO8601(date):
     return date
 
-
-def _count_category_price(offers_price, all_offers):
-    return floor(offers_price / all_offers) if all_offers > 0 else None
-
-
 ################SALES##################
 
 def get_updated_offers(date):
@@ -373,17 +370,58 @@ def get_updated_offers(date):
     updated_offers = Offer.objects.filter(
             imp__date__gte=start_date,
             imp__date__lte=finish_date
-        ).select_related('imp')
+        ).select_related('imp', 'parent')
 
     response = []
     for offer in updated_offers:
         offer_dict = {
             "id": offer.obj_id,
             "name": offer.name,
+            "parentId": offer.parent.obj_id if offer.parent else None,
             "type": "OFFER",
+            "price": offer.price,
             "date": _to_ISO8601(offer.imp.date)
         }
         response.append(offer_dict)
+
+    return response
+
+
+######################STATISTIC#######################
+
+def get_statistic(obj_id, date_start, date_end):
+
+    test_version = (Category.objects.filter(obj_id=obj_id)
+                    or Offer.objects.filter(obj_id=obj_id))[0]
+
+    if isinstance(test_version, Category):
+        versions = Category.objects.filter(
+                obj_id=obj_id,
+            ).select_related('imp', 'parent')
+        type_ = "CATEGORY"
+
+    elif isinstance(test_version, Offer):
+        versions = Category.objects.filter(
+                obj_id=obj_id,
+            ).select_related('imp', 'parent')
+        type_ = "OFFER"
+
+    if date_start:
+        versions.filter(imp__date__gte=date_start)
+    if date_end:
+        versions.filter(imp__date__lt=date_end)
+
+    response = []
+    for version in versions:
+        version_dict = {
+            "id": version.obj_id,
+            "name": version.name,
+            "parentId": version.parent.obj_id if version.parent else None,
+            "type": type_,
+            "price": version.price,
+            "date": _to_ISO8601(version.imp.date)
+        }
+        response.append(version_dict)
 
     return response
 
