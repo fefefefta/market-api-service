@@ -1,8 +1,11 @@
 import copy
 from math import floor
 
+from dateutil import parser
 from django.core.validators import MinValueValidator
 from django.db import models
+
+from market.exceptions import ValidationFailed
 
 
 class Import(models.Model):
@@ -10,6 +13,12 @@ class Import(models.Model):
 
     @classmethod
     def create_new_import(cls, update_date):
+        # Validating date 
+        try:
+            parser.isoparse(update_date)
+        except (parser.ParserError, ValueError):
+            raise ValidationFailed
+
         return cls.objects.create(date=update_date)
 
 

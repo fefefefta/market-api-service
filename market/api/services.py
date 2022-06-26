@@ -1,14 +1,67 @@
 import datetime
+import uuid
 
 from dateutil import parser
 from django.db import IntegrityError
 
+from market.exceptions import ItemNotFound, ValidationFailed
 from .models import Offer, Category
 
 
 ########################IMPORT##########################
 
+def validate(unit_json, units):
+    # validate id
+    try:
+        uuid.UUID(unit_json["id"])
+    except ValueError:
+        raise ValidationFailed
+
+    # validate parentId
+    try:
+        uuid.UUID(unit_json["parentId"])
+    except ValueError:
+        if unit_json["parentId"] is not None:
+            raise ValidationFailed
+
+    # validate parentId does not exist
+    if (unit_json["parentId"] is not None
+            and not Category.objects.filter(obj_id=unit_json["parentId"])
+            and unit_json["parentId"] not in [unit["id"] for unit in units]):
+        raise ValidationFailed
+
+    # validate name
+    if unit_json["name"] == '' or unit_json["name"] is None:
+        raise ValidationFailed
+
+    # validate type
+    if unit_json["type"] != any("OFFER", "CATEGORY"):
+        raise ValidationFailed
+
+    # validate price
+    if (unit_json["type"] == "OFFER"
+            and not isinstance(unit_json["price"], int)):
+        raise ValidationFailed
+    elif isinstance(unit_json["price"], int) and unit_json["price"] < 0:
+        raise ValidationFailed
+
+    elif unit_json["type"] == "CATEGORY" and unit_json["price"] is None:
+        raise ValidationFailed
+
+    # check type have not changed
+    if (unit_json["type"] == "OFFER" 
+            and Category.objects.filter(obj_id=unit_json["id"])):
+        raise ValidationFailed
+    elif (unit_json["type"] == "CATEGORY" 
+            and Offer.objects.filter(obj_id=unit_json["id"])):
+        raise ValidationFailed
+
+
 def import_category(category_json, import_):
+    """
+    Creates a parent if it is also a new category, but has not been
+    processed yet. Then imports the units.
+    """
     category_id = category_json["id"]
     parent_id = category_json["parentId"]
 
@@ -32,6 +85,7 @@ def import_category(category_json, import_):
 
 
 def _import_new_category(category_json, import_):
+    """Creates a new category and updates the date in the ancestors"""
     ancestors = _get_ancestors(category_json["parentId"])
     try:
         parent = ancestors[0]
@@ -57,6 +111,13 @@ def _import_new_category(category_json, import_):
 
 
 def _import_old_category(category_json, import_):
+    """
+    Copies the current state of the category and creates a historical
+    version for statistics. Then updates the state of the category and the
+    date of the ancestors. If the parent of a category changes, then the offers
+    and the total price are deducted from the old ancestors in order to add
+    them to the new ancestors.
+    """
     category = Category.objects.filter(
             obj_id=category_json["id"],
             is_actual=True
@@ -143,6 +204,11 @@ def _get_ancestors(parent_id):
 
 def _update_ancestors(ancestors_list, offers_diff=0, 
                       price_diff=0, imp=None):
+    """
+    Updates the ancestors of the updated unit. If the current version of the
+    ancestor refers to an old import, then a historical version of the ancestor
+    is created, and the import of the current ancestor is updated.
+    """
     def update_ancestor(ancestor, offers_diff=0,
                         price_diff=0, imp=None):
         ancestor.imp = imp or ancestor.imp
@@ -171,6 +237,7 @@ def _update_ancestors(ancestors_list, offers_diff=0,
 
 
 def import_offer(offer_json, import_):
+    """Same as in the import_category"""
     offer_id = offer_json["id"]
     parent_id = offer_json["parentId"]
 
@@ -192,6 +259,7 @@ def import_offer(offer_json, import_):
 
 
 def _import_new_offer(offer_json, import_):
+    """Same as in the _import_new_category"""
     ancestors = _get_ancestors(offer_json["parentId"])
     try:
         parent = ancestors[0]
@@ -216,6 +284,7 @@ def _import_new_offer(offer_json, import_):
 
 
 def _import_old_offer(offer_json, import_):
+    """Same as in the _import_old_category"""
     offer = Offer.objects.filter(
             obj_id=offer_json["id"],
             is_actual=True
@@ -272,9 +341,17 @@ def _import_old_offer(offer_json, import_):
 ########################DELETE_UNIT#########################
 
 def delete_unit_by_id(obj_id):
+    """
+    Finds the unit and updates the ancestors, subtracting the cost of deleted
+    offers from them.
+    """
     versions_to_delete = (Category.objects.filter(obj_id=obj_id)
                           or Offer.objects.filter(obj_id=obj_id))
-    actual_unit = versions_to_delete.filter(is_actual=True)[0]
+    try:
+        actual_unit = versions_to_delete.filter(is_actual=True)[0]
+    except IndexError:
+        raise ItemNotFound
+
     parent_id = (actual_unit.parent.obj_id if actual_unit.parent
                  else None)
 
@@ -298,45 +375,56 @@ def delete_unit_by_id(obj_id):
 
 ########################SHOW_UNIT#########################
 
-def make_representation(unit):
+def show_unit_by_id(obj_id):
+    """Finds the unit and make its representation"""
+    try:
+        unit = (Category.objects.filter(obj_id=obj_id, is_actual=True)
+                or Offer.objects.filter(obj_id=obj_id, is_actual=True)
+                .select_related('parent', 'imp'))[0]
+    except IndexError:
+        raise ItemNotFound
 
+    return _make_representation(unit)
+
+def _make_representation(unit):
+    """Creates a hierarchical json representation of an object."""
     if isinstance(unit, Offer):
         return {
                 "id": unit.obj_id,
                 "name": unit.name,
-                "date": _to_ISO8601(unit.imp.date),
+                "date": unit.imp.date,
                 "parentId": unit.parent.obj_id if unit.parent else None,
                 "type": "OFFER",
                 "price": unit.price,
                 "children": None
             }
-    elif isinstance(unit, Category):
+    else:
         children_offers = unit.children_offers.filter(is_actual=True)
         children_categories = unit.children_categories.filter(is_actual=True)
 
-        children = (list(map(make_representation, children_offers))
-                    + list(map(make_representation, children_categories)))
+        children = (list(map(_make_representation, children_offers))
+                    + list(map(_make_representation, children_categories)))
         return {
                 "id": unit.obj_id,
                 "name": unit.name,
-                "date": _to_ISO8601(unit.imp.date),
+                "date": unit.imp.date,
                 "parentId": unit.parent.obj_id if unit.parent else None,
                 "type": "CATEGORY",
                 "price": unit.price,
                 "children": children
             }
-    else:
-        raise Exception("БУ!!! Я злющая ошибка, не дам вам никакую ноду!"
-                        " Вы где-то оплошали, простофили!")
-
-
-def _to_ISO8601(date):
-    return date
 
 ########################SALES#########################
 
 def get_updated_offers(date):
-    finish_date = parser.isoparse(date)
+    """
+    Validates the date and returns all versions of objects created in the
+    segment [date - 24h, date]
+    """
+    try:
+        finish_date = parser.isoparse(date)
+    except (ValueError, parser.ParserError):
+        raise ValidationFailed
     start_date = finish_date - datetime.timedelta(days=1)
 
     updated_offers = Offer.objects.filter(
@@ -352,7 +440,7 @@ def get_updated_offers(date):
             "parentId": offer.parent.obj_id if offer.parent else None,
             "type": "OFFER",
             "price": offer.price,
-            "date": _to_ISO8601(offer.imp.date)
+            "date": offer.imp.date
         }
         response.append(offer_dict)
 
@@ -361,24 +449,33 @@ def get_updated_offers(date):
 ########################STATISTIC##########################
 
 def get_statistic(obj_id, date_start, date_end):
-    # To find out unit's type
-    test_version = (Category.objects.filter(obj_id=obj_id)
-                    or Offer.objects.filter(obj_id=obj_id))[0]
-    if isinstance(test_version, Category):
-        versions = Category.objects.filter(
-                obj_id=obj_id,
-            ).select_related('imp', 'parent')
+    """
+    Validates dates and returns a list of versions of object with obj_id=obj_id
+    created in the interval [date_start, date_end)
+    """
+    versions = ((Category.objects.filter(obj_id=obj_id)
+                 or Offer.objects.filter(obj_id=obj_id))
+                .select_related('imp', 'parent'))
+    if len(versions) == 0:    
+        raise ItemNotFound
+
+    if isinstance(versions[0], Category):
         type_ = "CATEGORY"
-    elif isinstance(test_version, Offer):
-        versions = Category.objects.filter(
-                obj_id=obj_id,
-            ).select_related('imp', 'parent')
+    elif isinstance(versions[0], Offer):
         type_ = "OFFER"
 
     if date_start:
-        versions.filter(imp__date__gte=date_start)
+        try:
+            date_start = parser.isoparse(date_start)
+        except (ValueError, parser.ParserError):
+            raise ValidationFailed
+        versions = versions.filter(imp__date__gte=date_start)
     if date_end:
-        versions.filter(imp__date__lt=date_end)
+        try:
+            date_end = parser.isoparse(date_end)
+        except (ValueError, parser.ParserError):
+            raise ValidationFailed
+        versions = versions.filter(imp__date__lt=date_end)
 
     response = []
     for version in versions:
@@ -388,7 +485,7 @@ def get_statistic(obj_id, date_start, date_end):
             "parentId": version.parent.obj_id if version.parent else None,
             "type": type_,
             "price": version.price,
-            "date": _to_ISO8601(version.imp.date)
+            "date": version.imp.date
         }
         response.append(version_dict)
 
