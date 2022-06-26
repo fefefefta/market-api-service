@@ -1,0 +1,21 @@
+version: "3.9"
+   
+services:
+  django_gunicorn:
+    build:
+      context: .
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+  db:
+    image: postgres:12.9-alpine
+    env_file:
+      - ./market/market/.env
+    expose:
+      - 5432
+    restart: always

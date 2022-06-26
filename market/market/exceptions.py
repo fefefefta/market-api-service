@@ -25,5 +25,9 @@ def custom_exception_handler(exc, context):
             response.data["code"] = exc.status_code
             response.data["message"] = exc.default_detail
             del response.data["detail"]
+        else:
+            response.data["code"] = ValidationFailed.status_code
+            response.data["message"] = ValidationFailed.default_detail
+            del response.data["detail"]
 
     return response
