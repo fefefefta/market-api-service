@@ -17,7 +17,7 @@ def import_units(request):
     import_ = Import.create_new_import(update_date)
 
     for item in items:
-        validate(item, items)
+        # validate(item, items)
         if item.get("type") == "CATEGORY":
             import_category(item, import_)
         else:

@@ -13,15 +13,15 @@ from .models import Offer, Category
 def validate(unit_json, units):
     # validate id
     try:
-        uuid.UUID(unit_json["id"])
+        uuid.UUID(unit_json["id"], version=4)
     except ValueError:
         raise ValidationFailed
 
     # validate parentId
-    try:
-        uuid.UUID(unit_json["parentId"])
-    except ValueError:
-        if unit_json["parentId"] is not None:
+    if unit_json["parentId"] is not None:
+        try:
+            uuid.UUID(unit_json["parentId"], version=4)
+        except ValueError:
             raise ValidationFailed
 
     # validate parentId does not exist
@@ -35,17 +35,17 @@ def validate(unit_json, units):
         raise ValidationFailed
 
     # validate type
-    if unit_json["type"] != any("OFFER", "CATEGORY"):
+    if unit_json["type"] != "OFFER" and unit_json["type"] != "CATEGORY":
         raise ValidationFailed
 
     # validate price
     if (unit_json["type"] == "OFFER"
-            and not isinstance(unit_json["price"], int)):
+            and not isinstance(unit_json.get("price"), int)):
         raise ValidationFailed
-    elif isinstance(unit_json["price"], int) and unit_json["price"] < 0:
+    elif isinstance(unit_json.get("price"), int) and unit_json.get("price") < 0:
         raise ValidationFailed
 
-    elif unit_json["type"] == "CATEGORY" and unit_json["price"] is None:
+    elif unit_json["type"] == "CATEGORY" and unit_json.get("price") is not None:
         raise ValidationFailed
 
     # check type have not changed
@@ -137,7 +137,12 @@ def _import_old_category(category_json, import_):
     # If parent is not updating for category
     if parent_id == category_json["parentId"]:
         category.save()
-        history_version.save()
+        try:
+            history_version.save()
+        # If category created as parent in current import. Sorry for this
+        # kostyl' :(
+        except UnboundLocalError:
+            pass
 
         ancestors = _get_ancestors(parent_id)
         _update_ancestors(ancestors, imp=import_)
@@ -149,18 +154,22 @@ def _import_old_category(category_json, import_):
             if category_json["parentId"] is None:
                 parent = None
             else:
-                raise Exception("КИНУЛИ НЕРЕАЛЬНОГО РОДИТЕЛЯ")
+                raise ValidationFailed
         category.parent = parent
         category.save()
-        history_version.save()
+        try:
+            history_version.save()
+        except UnboundLocalError:
+            pass
 
         # If parent is updating for category then we have to subtract
-        # category' offers and price from old ancestors and add them to new.
+        # category' **old** offers and price from old ancestors and add new
+        # ones to new.
         old_ancestors = _get_ancestors(parent_id)
         _update_ancestors(
                 old_ancestors,
-                offers_diff=-category.all_offers,
-                price_diff=-category.offers_price,
+                offers_diff=-history_version.all_offers,
+                price_diff=-history_version.offers_price,
                 imp=import_
             )
 
@@ -311,13 +320,13 @@ def _import_old_offer(offer_json, import_):
             )
     else:
         try:
-            parent = Offer.objects.filter(obj_id=offer_json["parentId"],
-                                          is_actual=True)[0]
+            parent = Category.objects.filter(obj_id=offer_json["parentId"],
+                                             is_actual=True)[0]
         except IndexError:
             if offer_json["parentId"] is None:
                 parent = None
             else:
-                raise Exception("КИНУЛИ НЕРЕАЛЬНОГО РОДИТЕЛЯ")
+                raise ValidationFailed
         offer.parent = parent
         offer.save()
         history_version.save()
@@ -326,7 +335,7 @@ def _import_old_offer(offer_json, import_):
         _update_ancestors(
                 old_ancestors,
                 offers_diff=-1,
-                price_diff=-offer.price,
+                price_diff=-history_version.price,
                 imp=import_
             )
 
